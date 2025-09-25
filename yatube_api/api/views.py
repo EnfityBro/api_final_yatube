@@ -1,11 +1,13 @@
-from rest_framework.response import Response
 from rest_framework import viewsets, mixins, permissions, filters, status
-from rest_framework.exceptions import ValidationError, PermissionDenied
+from rest_framework.response import Response
+from rest_framework.exceptions import (ValidationError, PermissionDenied,
+                                       NotFound)
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from .serializers import (FollowSerializer, PostSerializer,
                           CommentSerializer, GroupSerializer)
 from posts.models import Follow, Post, Group
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from .pagination import PostPageNumberPagination
+from .pagination import CustomLimitOffsetPagination
+from django.shortcuts import get_object_or_404
 
 
 class FollowViewSet(mixins.CreateModelMixin,
@@ -33,13 +35,11 @@ class PostViewSet(viewsets.ModelViewSet):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-    pagination_class = PostPageNumberPagination
+    pagination_class = CustomLimitOffsetPagination
 
     def list(self, request, *args, **kwargs):
-        limit = request.query_params.get('limit')
-        offset = request.query_params.get('offset')
-        if limit or offset:
-            self.pagination_class = PostPageNumberPagination
+        if (request.query_params.get('limit')
+                or request.query_params.get('offset')):
             return super().list(request, *args, **kwargs)
         else:
             serializer = self.get_serializer(self.get_queryset(), many=True)
@@ -75,11 +75,14 @@ class CommentViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        post = Post.objects.get(pk=self.kwargs['post_pk'])
-        return post.comments.all()
+        try:
+            post = Post.objects.get(pk=self.kwargs['post_pk'])
+            return post.comments.all()
+        except Post.DoesNotExist:
+            raise NotFound("Пост не найден")
 
     def perform_create(self, serializer):
-        post = Post.objects.get(pk=self.kwargs['post_pk'])
+        post = get_object_or_404(Post, pk=self.kwargs['post_pk'])
         serializer.save(author=self.request.user, post=post)
 
     def perform_update(self, serializer):
